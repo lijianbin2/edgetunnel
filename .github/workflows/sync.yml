@@ -1,7 +1,7 @@
 name: sync upstream
 on:
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 2 * * *'
   workflow_dispatch:
 jobs:
   sync:
@@ -13,4 +13,3 @@ jobs:
         run: gh api repos/lijianbin2/edgetunnel/merge-upstream --method POST -f branch=main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
