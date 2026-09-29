@@ -1,0 +1,47 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 0 * * *"   # daily safety net, in case sync produced no push
+  workflow_dispatch:
+
+concurrency:
+  group: edgetunnel-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy edgetunnel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 2   # needed so HEAD^ exists for the change check
+
+      - name: Skip if worker source unchanged
+        id: check
+        run: |
+          # Avoid burning API quota on no-op days: only deploy when the
+          # worker source or its deploy config actually changed.
+          CHANGED=$(git diff --name-only HEAD^ HEAD 2>/dev/null || echo "")
+          if ! echo "$CHANGED" | grep -qE '^(_worker\.js|wrangler\.toml)$'; then
+            echo "No relevant changes in _worker.js / wrangler.toml, skipping deploy."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
