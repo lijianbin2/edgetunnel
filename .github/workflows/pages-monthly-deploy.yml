@@ -1,0 +1,58 @@
+name: Pages Monthly Deploy（每月1号云端更新）
+
+# 每月1号 00:05 UTC（北京 08:05）在 GitHub 云端执行：
+#   1) 从上游 cmliu/edgetunnel 文件级同步 _worker.js（防历史分叉冲突）
+#   2) 有变化则 commit + push 回本仓
+#   3) wrangler pages deploy 直传部署到 Pages 项目 edgetunnel
+# 需要的 Secrets（Settings → Secrets and variables → Actions）：
+#   CLOUDFLARE_API_TOKEN（自建，见 LIVE 文档）、CLOUDFLARE_ACCOUNT_ID（已配好）
+
+on:
+  schedule:
+    - cron: "5 0 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-and-deploy:
+    name: Sync upstream and deploy to Pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Sync _worker.js from upstream (file-level, no merge)
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/cmliu/edgetunnel.git 2>/dev/null || true
+          git fetch upstream main
+          BEFORE=$(git hash-object _worker.js)
+          git checkout upstream/main -- _worker.js
+          AFTER=$(git hash-object _worker.js)
+          if [ "$BEFORE" != "$AFTER" ]; then
+            git add _worker.js
+            git commit -m "chore: 每月自动同步上游 _worker.js"
+            git push origin main
+          else
+            echo "_worker.js already matches upstream tip, skip commit."
+          fi
+
+      - name: Prepare deploy dir
+        run: |
+          rm -rf pages-deploy
+          mkdir -p pages-deploy
+          cp _worker.js pages-deploy/
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy pages-deploy --project-name=edgetunnel --branch=main
